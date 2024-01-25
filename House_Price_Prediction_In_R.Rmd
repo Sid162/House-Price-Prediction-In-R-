@@ -1,0 +1,420 @@
+---
+title: "Untitled"
+author: "Siddhartha Ranjan"
+date: "2023-11-29"
+output: html_document
+---
+
+```{r}
+
+# Loading necessary libraries
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(glmnet)
+library(corrplot)
+library(caret)
+library(MASS)
+library(olsrr)
+library(glasso)
+
+# Reading the training and test datasets
+train_data <- read_csv("C:/Users/13127/Downloads/train_set.csv")
+test_data <- read_csv("C:/Users/13127/Downloads/test_set.csv")
+
+```
+
+
+## Cross Checking any missing values
+
+```{r}
+# Define a function to count missing values
+count_missing_vals <- function(data, by_row = FALSE) {
+    if (!by_row) {
+        missing_results <- NULL
+        for (i in 1:ncol(data)) {
+            temp_vals <- sum(is.na(data[, i]))
+            temp_df <- as.data.frame(temp_vals)
+            temp_df$columns <- colnames(data)[i]
+            colnames(temp_df) <- c('NAs', 'columns') 
+            missing_results <- rbind(missing_results, temp_df)
+        }
+        return(missing_results)
+    } else {
+        missing_results <- NULL
+        for (i in 1:nrow(data)) {
+            temp_vals <- sum(is.na(data[i, ]))
+            temp_df <- as.data.frame(temp_vals)
+            temp_df$rows <- rownames(data)[i]
+            colnames(temp_df) <- c('NAs', 'rows') 
+            missing_results <- rbind(missing_results, temp_df)
+        }
+        return(missing_results) 
+    }
+}
+
+# Calculate missing values for train and test datasets
+train_missing_vals <- colSums(is.na(train_data))
+train_missing_vals <- train_missing_vals[train_missing_vals > 0]
+test_missing_vals <- colSums(is.na(test_data))
+test_missing_vals <- test_missing_vals[test_missing_vals > 0]
+
+# Print the missing values count
+train_missing_vals
+test_missing_vals
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# Create a function for plotting NA values
+plot_na_values <- function(data, title, fill_color) {
+  ggplot(data, aes(x = NAs, y = columns)) +
+    geom_bar(stat = "identity", fill = fill_color) +
+    labs(title = title,
+         x = "NA Values",
+         y = "Column Names") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    geom_text(aes(label = NAs), vjust = 0.5, hjust = -0.2, size = 3.5)
+}
+
+# Plot NA values in the train file
+train_plot <- plot_na_values(train_na_vals, "NA Values in Train File", "red")
+
+# Plot NA values in the test file
+test_plot <- plot_na_values(test_na_vals, "NA Values in Test File", "blue")
+
+# Display plots in a grid arrangement
+grid.arrange(train_plot, test_plot, ncol = 2)
+```
+
+## Handling the missing values in the train dataset
+
+```{r}
+# List of columns with missing values and their respective counts in train data
+cols_with_null_train <- c('price', 'area', 'bedrooms', 'bathrooms', 'stories', 
+                          'mainroad', 'guestroom', 'basement', 'hotwaterheating', 
+                          'airconditioning', 'parking', 'prefarea', 'furnishingstatus')
+null_counts_train <- c(33, 30, 29, 26, 24, 22, 20, 19, 18, 18, 15, 15, 14)
+
+# List of columns with missing values and their respective counts in train data
+cols_with_null_train <- c('price', 'area', 'bedrooms', 'bathrooms', 'stories', 
+                          'mainroad', 'guestroom', 'basement', 'hotwaterheating', 
+                          'airconditioning', 'parking', 'prefarea', 'furnishingstatus')
+null_counts_train <- c(33, 30, 29, 26, 24, 22, 20, 19, 18, 18, 15, 15, 14)
+
+# Replace NA values with appropriate imputation for each column in train data
+for (i in 1:length(cols_with_null_train)) {
+  col_train <- cols_with_null_train[i]
+  count_train <- null_counts_train[i]
+  
+  if (is.numeric(train_data[[col_train]])) {
+    # For numeric columns, impute with median
+    train_data[[col_train]][is.na(train_data[[col_train]])] <- median(train_data[[col_train]], na.rm = TRUE)
+  } else {
+    # For categorical columns, impute with mode
+    Mode <- function(x){
+      names(which.max(table(x, useNA = "no")))
+    }
+    
+    train_data[is.na(train_data[[col_train]]), col_train] <- Mode(train_data[[col_train]])
+  }
+}
+
+# Check again for missing values after imputation in train data
+train_missing_vals_imputed <- count_missing_vals(train_data)
+train_missing_vals_imputed <- train_missing_vals_imputed %>%
+    filter(NAs > 0)
+
+# Print the remaining missing values in the train dataset after imputation
+print(train_missing_vals_imputed)
+```
+
+## There is zero zero rows means our data is imputed correctly there is no missing values.
+
+## Handling the missing values in the test dataset
+
+```{r}
+# List of columns with missing values and their respective counts in test data
+cols_with_null_test <- c('stories', 'price', 'prefarea', 'parking', 'mainroad', 
+                         'hotwaterheating', 'guestroom', 'furnishingstatus', 
+                         'bedrooms', 'bathrooms', 'basement', 'area', 'airconditioning')
+null_counts_test <- c(6, 8, 3, 4, 6, 4, 6, 2, 7, 7, 5, 8, 4)
+
+# Replace NA values with appropriate imputation for each column in test data
+for (i in 1:length(cols_with_null_test)) {
+  col_test <- cols_with_null_test[i]
+  count_test <- null_counts_test[i]
+  
+  if (is.numeric(test_data[[col_test]])) {
+    # For numeric columns, impute with median
+    test_data[[col_test]][is.na(test_data[[col_test]])] <- median(test_data[[col_test]], na.rm = TRUE)
+  } else {
+    # For categorical columns, impute with mode
+    Mode <- function(x){
+      names(which.max(table(x, useNA = "no")))
+    }
+    
+    test_data[is.na(test_data[[col_test]]), col_test] <- Mode(test_data[[col_test]])
+  }
+}
+
+# Check again for missing values after imputation in test data
+test_missing_vals_imputed <- count_missing_vals(test_data)
+test_missing_vals_imputed <- test_missing_vals_imputed %>%
+    filter(NAs > 0)
+
+# Print the remaining missing values in the test dataset after imputation
+print(test_missing_vals_imputed)
+```
+
+## Since it's containing zero rows it means all the missing values have been replaced successfully.
+
+## Price EDA
+
+```{r}
+# Load required library
+library(ggplot2)
+
+# Visualizing the distribution of 'price' column
+ggplot(train_data, aes(x = price)) +
+  geom_histogram(bins = 30, fill = "red", color = "black") +
+  labs(title = "Price Distribution",
+       x = "Price",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# Load required library
+library(ggplot2)
+
+# Define colors for numerical and categorical columns
+numerical_colors <- c("red", "green", "blue", "orange", "purple")
+categorical_colors <- c("pink", "cyan", "magenta", "yellow", "grey", "brown", "#32CD32") # Lime green as hexadecimal
+
+# Numerical columns
+numerical_cols <- c("area", "bedrooms", "bathrooms", "stories", "parking")
+for(i in 1:length(numerical_cols)) {
+  col <- numerical_cols[i]
+  color <- numerical_colors[i]
+  p <- ggplot(train_data, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = color, color = "black") +
+    labs(title = paste("Distribution of", col),
+         x = col,
+         y = "Frequency") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+  print(p)
+}
+
+# Categorical columns
+categorical_cols <- c("mainroad", "guestroom", "basement", "hotwaterheating", "airconditioning", "prefarea", "furnishingstatus")
+for(i in 1:length(categorical_cols)) {
+  col <- categorical_cols[i]
+  color <- categorical_colors[i]
+  p <- ggplot(train_data, aes_string(x = col)) +
+    geom_bar(fill = color, color = "black") +
+    labs(title = paste("Frequency of", col),
+         x = col,
+         y = "Count") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+  print(p)
+}
+```
+
+
+```{r}
+# Process train data
+train_data_numeric <- train_data %>% select_if(is.numeric)
+train_data_cat <- train_data %>% select_if(~!is.numeric(.))
+train_data_cat_numeric <- train_data_cat %>% mutate_all(funs(as.integer(as.factor(.))))
+combined_train_data <- cbind(train_data_cat_numeric, train_data_numeric)
+
+# Process test data
+test_data_numeric <- test_data %>% select_if(is.numeric)
+test_data_cat <- test_data %>% select_if(~!is.numeric(.))
+test_data_cat_numeric <- test_data_cat %>% mutate_all(funs(as.integer(as.factor(.))))
+combined_test_data <- cbind(test_data_cat_numeric, test_data_numeric)
+
+# You can view the first few rows of the transformed datasets
+head(combined_train_data)
+head(combined_test_data)
+
+# Generating correlation plots for train data
+# Correlation plot for entire dataset
+corrplot(cor(combined_train_data, use = "complete.obs"), method = "color", order = "hclust", 
+         tl.col = "black", tl.srt = 45, type = "lower")
+title("Correlation Plot for Entire Dataset")
+
+# Correlation plot for categorical data
+corrplot(cor(train_data_cat_numeric, use = "complete.obs"), method = "color", order = "hclust", 
+         tl.col = "black", tl.srt = 45, type = "lower")
+title("Correlation Plot for Categorical Data")
+
+# Correlation plot for numeric data
+corrplot(cor(train_data_numeric, use = "complete.obs"), method = "color", order = "hclust", 
+         tl.col = "black", tl.srt = 45, type = "lower")
+title("Correlation Plot for Numeric Data")
+```
+
+```{r}
+set.seed(100)
+index <- sample(1:nrow(train_data), 0.75*nrow(train_data))
+df_train <- train_data[index,]
+df_test <- train_data[-index,]
+
+# Create initial linear model
+fit <- lm(log10(price) ~ . , data = df_train)
+summary(fit)
+# Identifying significant variables
+t <- summary(fit)$coefficients[,4] < 0.05
+name <- names(which(t == TRUE)) # Filter variables with p-value < 0.05
+print("Significant variables:")
+print(name)
+# Refit model using only significant variables
+if (all(name %in% colnames(df_train))) {
+    fit_name <- lm(log10(price) ~ . , data = df_train[, name])
+    summary(fit_name)
+
+    # Prediction using the new model
+    pred <- predict(fit_name, df_test)
+    result_lm1 <- data.frame(cbind(Actual_Values = df_test$price,
+                                   Predicted_Values = 10^(pred)))
+    rmse = sqrt(mean(fit_name$residuals^2))
+    mae = mean(fit_name$residuals^2)
+    error = data.frame('RMSE' = rmse, 'MAE' = mae,
+                       'R-Squared' = summary(fit_name)$r.squared)
+    print(rmse)
+    print(mae)
+    print(error)
+
+    # Plotting Actual vs Predicted Values
+    ggplot(df_test, aes(x = log10(price), y = log10(pred)))+
+      geom_point()+
+      geom_smooth()+
+      theme_minimal()+
+      labs(title = "Actual Values vs Predicted Values",
+           x = "Sale Price",
+           y = "Predicted Sale Price")+
+      theme(plot.title = element_text(hjust = 0.5, vjust = 0.5))
+
+    # Plotting Residuals
+    plot(residuals(fit_name))
+} else {
+    print("One or more variables in 'name' are not in 'df_train'")
+}
+```
+
+```{r}
+# Lasso Regression
+set.seed(100)
+index <- sample(1:nrow(train_data), 0.75*nrow(train_data))
+df_train <- train_data[index,]
+df_test <- train_data[-index,]
+
+# Creating model matrix for train and test data
+x_train <- model.matrix(price ~ ., df_train)[,-1]
+y_train <- log10(df_train$price)
+
+x_test <- model.matrix(price ~ ., df_test)[,-1]
+
+# Cross-validation for lambda selection
+set.seed(2021)
+cv_model <- cv.glmnet(x_train, y_train, alpha = 1)
+lambda_optimal <- cv_model$lambda.min
+
+# Fitting Lasso Model
+model_lasso <- glmnet(x_train, y_train, alpha = 1, lambda = lambda_optimal)
+
+# Predicting on test data and converting predictions back from log scale
+predicted_lasso <- predict(model_lasso, s = lambda_optimal, newx = x_test)
+predicted_lasso <- 10^predicted_lasso
+
+# Actual vs Predicted: Creating dataframe
+actual_vs_predicted_lasso <- data.frame(Actual = df_test$price, Predicted = as.vector(predicted_lasso))
+
+# Plotting Actual vs Predicted Prices
+ggplot(actual_vs_predicted_lasso, aes(x = Actual, y = Predicted)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm') +
+  labs(title = "Lasso Regression: Actual vs Predicted Prices", x = "Actual Price", y = "Predicted Price") +
+  theme_minimal()
+```
+
+
+```{r}
+# Load necessary library
+library(MASS)
+
+# Stepwise Regression using stepAIC
+set.seed(100)
+initial_model <- lm(log10(price) ~ ., data = df_train)
+stepwise_model_aic <- stepAIC(initial_model, direction = "both")
+
+# Summary of the stepwise model
+summary(stepwise_model_aic)
+
+```
+
+```{r}
+# Prediction using the stepwise model
+predicted_stepwise <- predict(stepwise_model_aic, df_test)
+predicted_stepwise <- 10^predicted_stepwise
+
+# Actual vs Predicted
+actual_vs_predicted_stepwise <- data.frame(Actual = df_test$price, Predicted = as.vector(predicted_stepwise))
+
+# Plotting Actual vs Predicted Prices
+ggplot(actual_vs_predicted_stepwise, aes(x = Actual, y = Predicted)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm') +
+  labs(title = "Stepwise Regression: Actual vs Predicted Prices", x = "Actual Price", y = "Predicted Price") +
+  theme_minimal()
+
+# Calculating RMSE and MAE
+rmse_stepwise <- sqrt(mean((log10(df_test$price) - log10(predicted_stepwise))^2))
+mae_stepwise <- mean(abs(log10(df_test$price) - log10(predicted_stepwise)))
+
+# Displaying error metrics
+error_stepwise <- data.frame(RMSE = rmse_stepwise, MAE = mae_stepwise)
+print(error_stepwise)
+```
+
+```{r}
+# Install Metrics package (if not already installed)
+if (!require(Metrics)) {
+  install.packages("Metrics", dependencies = TRUE)
+  library(Metrics)
+}
+
+# Load necessary library
+library(Metrics)
+
+# Fit a linear regression model
+model <- lm(log10(price) ~ ., data = df_train)
+
+# Make predictions on the test set
+predictions <- predict(model, newdata = df_test)
+
+# Calculate RMSE
+rmse_val <- rmse(df_test$price, 10^predictions)  # Converting predictions back from log scale
+
+# Calculate MAE
+mae_val <- mae(df_test$price, 10^predictions)  # Converting predictions back from log scale
+
+# Extract R-Squared and Adjusted R-Squared
+r_squared_val <- summary(model)$r.squared
+adjusted_r_squared_val <- summary(model)$adj.r.squared
+
+# Display the Metrics
+cat("RMSE:", rmse_val, "\n")
+cat("MAE:", mae_val, "\n")
+cat("R-Squared:", r_squared_val, "\n")
+cat("Adjusted R-Squared:", adjusted_r_squared_val, "\n")
+```
+
